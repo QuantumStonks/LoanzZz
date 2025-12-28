@@ -24,7 +24,7 @@ import { getPrice, getAllPrices } from './services/priceOracle.js';
 import { updateAllLTVs, getActiveLoans, accrueInterest } from './services/loanEngine.js';
 import { scanAndLiquidate } from './services/liquidationEngine.js';
 import { distributeStakingRewards, getStakingStats } from './services/xecxStaking.js';
-import { syncEscrowBalances } from './services/chronikService.js';
+import { syncEscrowBalances, initializeEscrowWallet } from './services/chronikService.js';
 import { startWatchingDeposits } from './services/solanaService.js';
 
 // WebSocket
@@ -101,6 +101,11 @@ initWebSocket(wss);
 // Initialize database
 console.log('🚀 Initializing LoanzZz Backend...');
 getDatabase();
+
+// Initialize escrow wallet with live Chronik balance (delay to ensure DB ready)
+setTimeout(() => {
+    initializeEscrowWallet().catch(err => console.error('Escrow init error:', err));
+}, 1000);
 
 // Start Solana deposit watcher
 startWatchingDeposits();

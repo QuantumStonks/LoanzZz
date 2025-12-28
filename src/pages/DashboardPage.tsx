@@ -1,11 +1,30 @@
+import { useState } from 'react';
 import { useWalletStore, useLoanStore, usePriceStore, useUIStore } from '../stores';
 import LoanCard from '../components/LoanCard';
+import RepayModal from '../components/RepayModal';
+import AddCollateralModal from '../components/AddCollateralModal';
+import type { Loan } from '../api/client';
 
 export default function DashboardPage() {
     const { user } = useWalletStore();
     const { loans, isLoading } = useLoanStore();
     const { prices } = usePriceStore();
     const { setWalletModalOpen, setCreateLoanModalOpen, setDepositModalOpen } = useUIStore();
+
+    // Modal state for loan actions
+    const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
+    const [repayModalOpen, setRepayModalOpen] = useState(false);
+    const [addCollateralModalOpen, setAddCollateralModalOpen] = useState(false);
+
+    const handleRepay = (loan: Loan) => {
+        setSelectedLoan(loan);
+        setRepayModalOpen(true);
+    };
+
+    const handleAddCollateral = (loan: Loan) => {
+        setSelectedLoan(loan);
+        setAddCollateralModalOpen(true);
+    };
 
     if (!user) {
         return (
@@ -77,10 +96,39 @@ export default function DashboardPage() {
                     </div>
                 ) : (
                     <div className="grid grid-2">
-                        {loans.map(loan => <LoanCard key={loan.id} loan={loan} />)}
+                        {loans.map(loan => (
+                            <LoanCard
+                                key={loan.id}
+                                loan={loan}
+                                onRepay={() => handleRepay(loan)}
+                                onAddCollateral={() => handleAddCollateral(loan)}
+                            />
+                        ))}
                     </div>
                 )}
             </div>
+
+            {/* Repay Modal */}
+            {repayModalOpen && selectedLoan && (
+                <RepayModal
+                    loan={selectedLoan}
+                    onClose={() => {
+                        setRepayModalOpen(false);
+                        setSelectedLoan(null);
+                    }}
+                />
+            )}
+
+            {/* Add Collateral Modal */}
+            {addCollateralModalOpen && selectedLoan && (
+                <AddCollateralModal
+                    loan={selectedLoan}
+                    onClose={() => {
+                        setAddCollateralModalOpen(false);
+                        setSelectedLoan(null);
+                    }}
+                />
+            )}
         </div>
     );
 }

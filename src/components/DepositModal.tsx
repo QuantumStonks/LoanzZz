@@ -1,6 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useWalletStore, useUIStore } from '../stores';
 import { depositXEC, depositUSDT } from '../api/client';
+
+// Platform escrow address from environment
+const PLATFORM_XEC_ADDRESS = 'ecash:qr3dscd57mfs99f93xwaxhe5xzdkzlhahg58pzn9kx';
+const PLATFORM_SOLANA_ADDRESS = '9Kyjhrm1meis6rj62RquFNd3PUSWUiHD3XwhxuzVmrQj';
 
 export default function DepositModal() {
     const { user } = useWalletStore();
@@ -10,6 +14,82 @@ export default function DepositModal() {
     const [isLoading, setIsLoading] = useState(false);
     const [success, setSuccess] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
+    const payButtonRef = useRef<HTMLDivElement>(null);
+
+    // Load PayButton script and render
+    useEffect(() => {
+        if (activeTab !== 'xec') return;
+
+        // Load PayButton script if not already loaded
+        const existingScript = document.querySelector('script[src*="paybutton"]');
+        if (!existingScript) {
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/@paybutton/paybutton/dist/paybutton.js';
+            script.async = true;
+            document.body.appendChild(script);
+
+            script.onload = () => renderPayButton();
+        } else {
+            // Script already loaded, render button
+            renderPayButton();
+        }
+    }, [activeTab, user]);
+
+    const renderPayButton = () => {
+        if (!payButtonRef.current || !user) return;
+
+        // Clear previous button
+        payButtonRef.current.innerHTML = '';
+
+        // Check if PayButton is available
+        const PayButton = (window as any).PayButton;
+        if (!PayButton) {
+            console.log('PayButton not loaded yet, retrying...');
+            setTimeout(renderPayButton, 500);
+            return;
+        }
+
+        try {
+            PayButton.render(payButtonRef.current, {
+                to: PLATFORM_XEC_ADDRESS,
+                amount: 0, // Allow any amount
+                currency: 'XEC',
+                text: 'Deposit XEC',
+                hoverText: 'Click to pay with XEC',
+                theme: {
+                    palette: {
+                        primary: '#00d4aa',
+                        secondary: '#1a1a2e',
+                        tertiary: '#ffffff'
+                    }
+                },
+                onSuccess: async (txid: string, amount: number) => {
+                    console.log('PayButton success:', txid, amount);
+                    setSuccess(`Payment detected! TxID: ${txid.slice(0, 16)}...`);
+
+                    // Credit the user's balance on backend
+                    try {
+                        await depositXEC(user.id, amount, txid);
+                        setSuccess(`Deposited ${amount.toLocaleString()} XEC successfully!`);
+                    } catch (err: any) {
+                        console.error('Failed to credit deposit:', err);
+                        setError('Payment received but failed to credit balance. Contact support.');
+                    }
+                },
+                onTransaction: (txid: string) => {
+                    console.log('PayButton transaction:', txid);
+                    setSuccess(`Transaction detected: ${txid.slice(0, 16)}...`);
+                },
+                goalAmount: undefined,
+                editable: true,
+                randomSatoshis: true
+            });
+            console.log('PayButton rendered successfully');
+        } catch (err) {
+            console.error('PayButton render error:', err);
+        }
+    };
 
     const handleDeposit = async () => {
         if (!user || !amount) return;
@@ -46,6 +126,16 @@ export default function DepositModal() {
         }
     };
 
+    const copyToClipboard = async (text: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy:', err);
+        }
+    };
+
     return (
         <div className="modal-overlay" onClick={() => setDepositModalOpen(false)}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -77,24 +167,42 @@ export default function DepositModal() {
                     {activeTab === 'xec' ? (
                         <div className="deposit-content mt-6">
                             <p className="text-muted mb-4">
-                                Send XEC to the address below or use PayButton to deposit instantly.
+                                Use PayButton to deposit XEC instantly, or send directly to the address below.
                             </p>
 
-                            {/* PayButton placeholder */}
+                            {/* Real PayButton */}
                             <div
+                                ref={payButtonRef}
                                 className="paybutton-container"
-                                data-to="ecash:qz..."
-                                data-amount={amount || '0'}
+                                style={{ minHeight: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             >
                                 <div className="paybutton-placeholder">
                                     <span className="paybutton-icon">💰</span>
-                                    <span>PayButton</span>
-                                    <span className="text-sm text-muted">Click to deposit XEC</span>
+                                    <span>Loading PayButton...</span>
                                 </div>
                             </div>
 
                             <div className="divider">
-                                <span>or enter amount manually</span>
+                                <span>or send directly</span>
+                            </div>
+
+                            {/* Deposit Address */}
+                            <div className="address-box">
+                                <label className="label">Deposit Address (eCash)</label>
+                                <div className="address">
+                                    <span style={{ fontSize: '0.75rem' }}>{PLATFORM_XEC_ADDRESS}</span>
+                                    <button
+                                        className="copy-btn"
+                                        onClick={() => copyToClipboard(PLATFORM_XEC_ADDRESS)}
+                                        title="Copy address"
+                                    >
+                                        {copied ? '✓' : '📋'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="divider">
+                                <span>or simulate deposit</span>
                             </div>
 
                             <div className="form-group">
@@ -113,7 +221,7 @@ export default function DepositModal() {
                                 onClick={handleDeposit}
                                 disabled={isLoading || !amount}
                             >
-                                {isLoading ? 'Processing...' : 'Deposit XEC'}
+                                {isLoading ? 'Processing...' : 'Simulate Deposit'}
                             </button>
                         </div>
                     ) : (
@@ -125,8 +233,14 @@ export default function DepositModal() {
                             <div className="address-box">
                                 <label className="label">Deposit Address (Solana USDT)</label>
                                 <div className="address">
-                                    <span>So...</span>
-                                    <button className="copy-btn">📋</button>
+                                    <span style={{ fontSize: '0.75rem' }}>{PLATFORM_SOLANA_ADDRESS}</span>
+                                    <button
+                                        className="copy-btn"
+                                        onClick={() => copyToClipboard(PLATFORM_SOLANA_ADDRESS)}
+                                        title="Copy address"
+                                    >
+                                        {copied ? '✓' : '📋'}
+                                    </button>
                                 </div>
                                 <p className="text-xs text-muted mt-2">
                                     Only send USDT on Solana network to this address
@@ -164,7 +278,7 @@ export default function DepositModal() {
                                 onClick={handleDeposit}
                                 disabled={isLoading || !amount}
                             >
-                                {isLoading ? 'Processing...' : 'Deposit USDT → USD'}
+                                {isLoading ? 'Processing...' : 'Simulate USDT → USD'}
                             </button>
                         </div>
                     )}
@@ -199,18 +313,12 @@ export default function DepositModal() {
         }
 
         .paybutton-container {
-          padding: var(--space-6);
+          padding: var(--space-4);
           background: rgba(0, 212, 170, 0.1);
           border: 2px dashed rgba(0, 212, 170, 0.3);
           border-radius: var(--radius-xl);
           text-align: center;
-          cursor: pointer;
           transition: all var(--transition-base);
-        }
-
-        .paybutton-container:hover {
-          border-color: var(--color-accent-primary);
-          background: rgba(0, 212, 170, 0.15);
         }
 
         .paybutton-placeholder {
@@ -218,6 +326,7 @@ export default function DepositModal() {
           flex-direction: column;
           align-items: center;
           gap: var(--space-2);
+          color: var(--color-text-muted);
         }
 
         .paybutton-icon {
@@ -255,6 +364,7 @@ export default function DepositModal() {
           border-radius: var(--radius-md);
           font-family: monospace;
           margin-top: var(--space-2);
+          gap: var(--space-2);
         }
 
         .copy-btn {
@@ -262,6 +372,13 @@ export default function DepositModal() {
           border: none;
           cursor: pointer;
           font-size: var(--font-size-lg);
+          padding: var(--space-1);
+          border-radius: var(--radius-sm);
+          transition: background var(--transition-fast);
+        }
+
+        .copy-btn:hover {
+          background: rgba(255, 255, 255, 0.1);
         }
 
         .conversion-info {
